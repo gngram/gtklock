@@ -58,6 +58,7 @@ static int conversation(
 		switch(msg[i]->msg_style) {
 			case PAM_PROMPT_ECHO_OFF:
 			case PAM_PROMPT_ECHO_ON:
+        printf("GTKLOCK-conversation----ECHO_ON/OFF\n");
 				resp[i]->resp = strdup(data->pw);
 				if(resp[i]->resp == NULL) {
 					g_warning("Failed allocation");
@@ -65,6 +66,7 @@ static int conversation(
 				}
 				break;
 			case PAM_ERROR_MSG:
+        printf("GTKLOCK-conversation----ERROR\n");
 				send_msg(msg[i]->msg, data->err[1]);
 				break;
 			case PAM_TEXT_INFO:
