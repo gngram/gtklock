@@ -25,11 +25,13 @@ static char *message_string = NULL;
 
 char *auth_get_error(void) {
 	char *s = error_string;
+  printf("GTKLOCK----Error-nulled\n");
 	error_string = NULL;
 	return s;
 }
 char *auth_get_message(void) {
 	char *s = message_string;
+  printf("GTKLOCK----Message-nulled\n");
 	message_string = NULL;
 	return s;
 }
@@ -53,6 +55,7 @@ static int conversation(
 		return PAM_ABORT;
 	}
 
+  printf("GTKLOCK-conversation----num: %d\n", num_msg);
 	for(int i = 0; i < num_msg; ++i) {
 		resp[i]->resp_retcode = 0;
 		switch(msg[i]->msg_style) {
@@ -66,10 +69,11 @@ static int conversation(
 				}
 				break;
 			case PAM_ERROR_MSG:
-        printf("GTKLOCK-conversation----ERROR\n");
+        printf("GTKLOCK-conversation----ERROR: %s\n", msg[i]->msg);
 				send_msg(msg[i]->msg, data->err[1]);
 				break;
 			case PAM_TEXT_INFO:
+        printf("GTKLOCK-conversation----TEXT: %s\n", msg[i]->msg);
 				send_msg(msg[i]->msg, data->out[1]);
 				break;
 		}
@@ -107,6 +111,11 @@ static void auth_child(const char *s, int *err, int *out) {
 	exit(EXIT_FAILURE);
 }
 
+/*
+enum pwcheck auth_pw_check(const char *s, msgq mq, ) {
+}
+*/
+
 enum pwcheck auth_pw_check(const char *s) {
 	static pipe_t err_pipe;
 	static pipe_t out_pipe;
@@ -123,6 +132,7 @@ enum pwcheck auth_pw_check(const char *s) {
 			g_warning("out pipe failure");
 			return PW_WAIT;
 		}
+
 		pid = fork();
 		if(pid == -1) {
 			close(err_pipe[PIPE_PARENT]);
@@ -135,6 +145,7 @@ enum pwcheck auth_pw_check(const char *s) {
 		else if(pid == 0) {
 			close(err_pipe[PIPE_PARENT]);
 			close(out_pipe[PIPE_PARENT]);
+      printf("GTKLOCK-----start auth child\n");
 			freopen("/dev/null", "r", stdin);
 			auth_child(s, err_pipe, out_pipe);
 		}
@@ -144,6 +155,10 @@ enum pwcheck auth_pw_check(const char *s) {
 		fcntl(out_pipe[PIPE_PARENT], F_SETFL, O_NONBLOCK);
 	}
 
+  if (error_string)
+    printf("GTKLOCK----Free Error %p\n", error_string);
+  if (message_string)
+    printf("GTKLOCK----Free Message %p\n",  message_string);
 	if(error_string) free(error_string);
 	if(message_string) free(message_string);
 
@@ -152,6 +167,7 @@ enum pwcheck auth_pw_check(const char *s) {
 	nread = read(err_pipe[PIPE_PARENT], &len, sizeof(size_t));
 	if(nread > 0 && len <= PAM_MAX_MSG_SIZE) {
 		error_string = malloc(PAM_MAX_MSG_SIZE);
+    printf("GTKLOCK----alloced error PW_ERROR %p \n", error_string);
 		nread = read(err_pipe[PIPE_PARENT], error_string, len);
 		error_string[nread] = '\0';
 		return PW_ERROR;
@@ -159,6 +175,7 @@ enum pwcheck auth_pw_check(const char *s) {
 	nread = read(out_pipe[PIPE_PARENT], &len, sizeof(size_t));
 	if(nread > 0 && len <= PAM_MAX_MSG_SIZE) {
 		message_string = malloc(PAM_MAX_MSG_SIZE);
+    printf("GTKLOCK----alloced message PW_MESSAGE %p \n", message_string);
 		nread = read(out_pipe[PIPE_PARENT], message_string, len);
 		message_string[nread] = '\0';
 		return PW_MESSAGE;
@@ -167,9 +184,10 @@ enum pwcheck auth_pw_check(const char *s) {
 	int status;
 	if(waitpid(pid, &status, WNOHANG) != 0 && WIFEXITED(status)) {
 		pid = -2;
-		if(WEXITSTATUS(status) == EXIT_SUCCESS) return PW_SUCCESS;
-		else return PW_FAILURE;
+
+		if(WEXITSTATUS(status) == EXIT_SUCCESS) {     printf("GTKLOCK-----PW_SUCCESS \n"); return PW_SUCCESS;}
+		else {printf("GTKLOCK-----PW_FAILURE \n"); return PW_FAILURE; }
 	}
+
 	return PW_WAIT;
 }
-

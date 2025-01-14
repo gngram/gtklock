@@ -14,8 +14,13 @@
 #include "gtklock.h"
 #include "auth.h"
 #include "module.h"
+#include "msgq.h"
 
 extern struct GtkLock *gtklock;
+
+struct auth_window_ctx {
+		struct Window *window;
+};
 
 struct Window *window_by_widget(GtkWidget *window) {
 	for(guint idx = 0; idx < gtklock->windows->len; idx++) {
@@ -177,6 +182,7 @@ static gpointer window_pw_wait(gpointer data) {
 
 void window_pw_check(GtkWidget *widget, gpointer data) {
 	struct Window *ctx = data;
+	msgq mq = init_mq();
 	window_set_busy(ctx, TRUE);
 	gtk_label_set_text(GTK_LABEL(ctx->error_label), NULL);
 	g_thread_new(NULL, window_pw_wait, ctx);
@@ -332,11 +338,11 @@ struct Window *create_window(GdkMonitor *monitor) {
 
 	w->overlay = gtk_overlay_new();
 	gtk_container_add(GTK_CONTAINER(w->window), w->overlay);
-	
+
 	GtkBuilder *builder = NULL;
 	if(gtklock->layout_path) builder = gtk_builder_new_from_file(gtklock->layout_path);
 	else builder = gtk_builder_new_from_resource("/gtklock/gtklock.ui");
-	
+
 	gtk_builder_connect_signals(builder, w);
 
 	w->window_box = GTK_WIDGET(gtk_builder_get_object(builder, "window-box"));
@@ -355,7 +361,7 @@ struct Window *create_window(GdkMonitor *monitor) {
 	w->unlock_button = GTK_WIDGET(gtk_builder_get_object(builder, "unlock-button"));
 	w->error_label = GTK_WIDGET(gtk_builder_get_object(builder, "error-label"));
 	w->warning_label = GTK_WIDGET(gtk_builder_get_object(builder, "warning-label"));
-	
+
 	w->info_box = GTK_WIDGET(gtk_builder_get_object(builder, "info-box"));
 	w->time_box = GTK_WIDGET(gtk_builder_get_object(builder, "time-box"));
 
@@ -372,4 +378,3 @@ struct Window *create_window(GdkMonitor *monitor) {
 	g_object_unref(builder);
 	return w;
 }
-

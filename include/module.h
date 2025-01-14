@@ -18,4 +18,3 @@ void module_on_idle_hide(struct GtkLock *gtklock);
 void module_on_idle_show(struct GtkLock *gtklock);
 void module_on_window_create(struct GtkLock *gtklock, struct Window *win);
 void module_on_window_destroy(struct GtkLock *gtklock, struct Window *win);
-
