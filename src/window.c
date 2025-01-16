@@ -8,19 +8,17 @@
 #include <glib/gi18n-lib.h>
 #include <gtk/gtk.h>
 #include <gtk-session-lock.h>
+#include <security/pam_appl.h>
 
 #include "util.h"
 #include "window.h"
 #include "gtklock.h"
 #include "auth.h"
 #include "module.h"
-#include "msgq.h"
+#include "message_q.h"
+
 
 extern struct GtkLock *gtklock;
-
-struct auth_window_ctx {
-		struct Window *window;
-};
 
 struct Window *window_by_widget(GtkWidget *window) {
 	for(guint idx = 0; idx < gtklock->windows->len; idx++) {
@@ -142,51 +140,124 @@ static gboolean window_pw_failure(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+#if 0
+static gboolean window_auth_status(gpointer data) {
+	struct conv_data *authdata = (struct conv_data *)data;
+	struct Window *ctx = authdata->ctx;
+	window_set_busy(authdata->ctx, FALSE);
+	if (authdata->error) {
+		gtk_entry_set_text(GTK_ENTRY(ctx->input_field), "");
+		gtk_entry_grab_focus_without_selecting(GTK_ENTRY(ctx->input_field));
+		gtk_label_set_text(GTK_LABEL(ctx->error_label), authdata->msg);
+	}
+	else {
+		gtk_label_set_text(GTK_LABEL(ctx->info_box), authdata->msg);
+	}
+
+
+	return G_SOURCE_REMOVE;
+}
+#endif
+
 static gboolean window_pw_message(gpointer data) {
 	window_setup_messages((struct Window *)data);
 	return G_SOURCE_REMOVE;
 }
 
-static gpointer window_pw_wait(gpointer data) {
-	struct Window *ctx = data;
-	const char *password = gtk_entry_get_text((GtkEntry*)ctx->input_field);
-	while(TRUE) {
-		enum pwcheck ret = auth_pw_check(password);
-		switch(ret) {
-			case PW_FAILURE:
-				g_main_context_invoke(NULL, window_pw_failure, ctx);
-				return NULL;
-			case PW_SUCCESS:
-				g_application_quit(G_APPLICATION(gtklock->app));
-				return NULL;
-			case PW_ERROR:
+static void clear_messages(gpointer ctx)
+{
+    for(guint idx = 0; idx < gtklock->errors->len; idx++) {
+        char *err = g_array_index(gtklock->errors, char *, idx);
+        g_array_remove_index(gtklock->errors, idx);
+        g_free(err);
+        //window_setup_messages(data->ctx);
+
+    }
+    for(guint idx = 0; idx < gtklock->messages->len; idx++) {
+        char *msg = g_array_index(gtklock->messages, char *, idx);
+        g_array_remove_index(gtklock->messages, idx);
+        g_free(msg);
+    }
+}
+
+static int conversation(
+	int num_msg,
+	const struct pam_message **msg,
+	struct pam_response **resp,
+	void *appdata_ptr
+)
+{
+	struct conv_data *data = appdata_ptr;
+
+    if (data->error) {
+        return PAM_CONV_ERR;
+    }
+
+	*resp = calloc(num_msg, sizeof(struct pam_response));
+	if(*resp == NULL) {
+		g_warning("Failed allocation");
+		return PAM_ABORT;
+	}
+
+	for(int i = 0; i < num_msg; ++i) {
+		resp[i]->resp_retcode = 0;
+		switch(msg[i]->msg_style) {
+			case PAM_PROMPT_ECHO_OFF:
+			case PAM_PROMPT_ECHO_ON:
+                printf("GTKLOCK------echo---\n");
+				resp[i]->resp = g_strdup(data->pw);
+				break;
+
+			case PAM_ERROR_MSG:
 				{
-					char *err = auth_get_error();
-					g_array_append_val(gtklock->errors, err);
-					g_main_context_invoke(NULL, window_pw_message, ctx);
+                    char *message = g_strdup(msg[i]->msg);
+                    clear_messages(data->ctx);
+                    g_array_append_val(gtklock->errors, message);
+                    g_main_context_invoke(NULL, window_pw_message, (gpointer)data->ctx);
+                    data->error = TRUE;
 				}
 				break;
-			case PW_MESSAGE:
+
+			case PAM_TEXT_INFO:
 				{
-					char *msg = auth_get_message();
-					g_array_append_val(gtklock->messages, msg);
-					g_main_context_invoke(NULL, window_pw_message, ctx);
+                    char *message = g_strdup(msg[i]->msg);
+                    clear_messages(data->ctx);
+                    g_array_append_val(gtklock->messages, message);
+                    g_main_context_invoke(NULL, window_pw_message, (gpointer)data->ctx);
 				}
-				break;
-			case PW_WAIT:
 				break;
 		}
 	}
 
+	return PAM_SUCCESS;
 }
 
-void window_pw_check(GtkWidget *widget, gpointer data) {
-	struct Window *ctx = data;
-	msgq mq = init_mq();
+static gpointer window_pw_wait(gpointer data)
+{
+	struct Window *ctx = (struct Window *)data;
+	const char *password = gtk_entry_get_text((GtkEntry*)ctx->input_field);
+    struct conv_data convdata = { .pw = password, .ctx = data, .error = FALSE};
+	int status = start_authentication(&conversation, convdata);
+	if (status == PW_FAILURE) {
+		printf("[GGTKLOCK] window_pw_wait----FAIL\n");
+		g_main_context_invoke(NULL, window_pw_failure, ctx);
+	}
+	else {
+		printf("[GGTKLOCK] window_pw_wait----SUCCESS\n");
+		g_application_quit(G_APPLICATION(gtklock->app));
+	}
+	return NULL;
+}
+
+void window_pw_check(GtkWidget *widget, gpointer data)
+{
+	printf("[GGTKLOCK] window_pw_check----start\n");
+	struct Window *ctx = (struct Window *)data;
 	window_set_busy(ctx, TRUE);
 	gtk_label_set_text(GTK_LABEL(ctx->error_label), NULL);
-	g_thread_new(NULL, window_pw_wait, ctx);
+	g_thread_new(NULL, window_pw_wait, data);
 }
+
 
 static void window_pw_set_vis(GtkEntry* entry, gboolean visibility) {
 	const char *icon = visibility ? "view-conceal-symbolic" : "view-reveal-symbolic";

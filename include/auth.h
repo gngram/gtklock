@@ -6,6 +6,9 @@
 #pragma once
 
 #include <glib.h>
+#include <security/pam_appl.h>
+
+#include "message_q.h"
 
 enum pwcheck {
 	PW_WAIT,
@@ -23,7 +26,17 @@ enum pipedir {
 
 typedef int pipe_t[PIPE_LAST];
 
-char *auth_get_error(void);
-char *auth_get_message(void);
-enum pwcheck auth_pw_check(const char *s);
+struct conv_data {
+	gboolean error;
+	const char *pw;
+	gpointer ctx;
+};
 
+//char *auth_get_error(void);
+//char *auth_get_message(void);
+
+enum pwcheck auth_pw_check(const char *s);
+int start_authentication(
+	int (*convers)(int, const struct pam_message **, struct pam_response **, void *),
+	struct conv_data data
+);

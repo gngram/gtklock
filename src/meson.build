@@ -10,4 +10,5 @@ gtklock_sources = files([
   'util.c',
   'window.c',
   'xdg.c',
+  'message_q.c',
 ])

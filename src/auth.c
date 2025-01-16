@@ -13,16 +13,20 @@
 #include <security/pam_appl.h>
 
 #include "auth.h"
+#include "message_q.h"
 
+/*
 struct conv_data {
 	const char *pw;
 	int *err;
 	int *out;
 };
+*/
+
 
 static char *error_string = NULL;
 static char *message_string = NULL;
-
+#if 0
 char *auth_get_error(void) {
 	char *s = error_string;
   printf("GTKLOCK----Error-nulled\n");
@@ -36,51 +40,15 @@ char *auth_get_message(void) {
 	return s;
 }
 
+
 static void send_msg(const char *msg, int fd) {
 	size_t len = strlen(msg);
 	write(fd, &len, sizeof(size_t));
 	write(fd, msg, len);
 }
+#endif
 
-static int conversation(
-	int num_msg,
-	const struct pam_message **msg,
-	struct pam_response **resp,
-	void *appdata_ptr
-) {
-	struct conv_data *data = appdata_ptr;
-	*resp = calloc(num_msg, sizeof(struct pam_response));
-	if(*resp == NULL) {
-		g_warning("Failed allocation");
-		return PAM_ABORT;
-	}
-
-  printf("GTKLOCK-conversation----num: %d\n", num_msg);
-	for(int i = 0; i < num_msg; ++i) {
-		resp[i]->resp_retcode = 0;
-		switch(msg[i]->msg_style) {
-			case PAM_PROMPT_ECHO_OFF:
-			case PAM_PROMPT_ECHO_ON:
-        printf("GTKLOCK-conversation----ECHO_ON/OFF\n");
-				resp[i]->resp = strdup(data->pw);
-				if(resp[i]->resp == NULL) {
-					g_warning("Failed allocation");
-					return PAM_ABORT;
-				}
-				break;
-			case PAM_ERROR_MSG:
-        printf("GTKLOCK-conversation----ERROR: %s\n", msg[i]->msg);
-				send_msg(msg[i]->msg, data->err[1]);
-				break;
-			case PAM_TEXT_INFO:
-        printf("GTKLOCK-conversation----TEXT: %s\n", msg[i]->msg);
-				send_msg(msg[i]->msg, data->out[1]);
-				break;
-		}
-	}
-	return PAM_SUCCESS;
-}
-
+/*
 static void auth_child(const char *s, int *err, int *out) {
 	struct passwd *pwd = NULL;
 
@@ -109,14 +77,56 @@ static void auth_child(const char *s, int *err, int *out) {
 		fprintf(stderr, "pam_end() failed");
 	if(ret == PAM_SUCCESS) exit(EXIT_SUCCESS);
 	exit(EXIT_FAILURE);
+} */
+
+int start_authentication(
+		int (*convers)(int, const struct pam_message **, struct pam_response **, void *),
+		struct conv_data data
+	)
+{
+	printf("[GGTKLOCK] start_authentication----start\n");
+	struct passwd *pwd = getpwuid(getuid());
+
+	if(pwd == NULL) {
+		perror("getpwnam");
+		printf("[GGTKLOCK] start_authentication----ret1111\n");
+		return PW_FAILURE;
+	}
+	errno = 0;
+
+	char *username = pwd->pw_name;
+	int pam_status;
+
+	struct pam_handle *handle;
+	struct pam_conv conv = { convers, (void *)&data };
+
+	printf("[GGTKLOCK] start_authentication----starting pam\n");
+	pam_status = pam_start("gtklock", username, &conv, &handle);
+	if(pam_status != PAM_SUCCESS) {
+		printf("[GGTKLOCK] start_authentication----start pam failed\n");
+		fprintf(stderr, "pam_start() failed");
+		return PW_FAILURE;
+	}
+
+	int auth_status = pam_authenticate((pam_handle_t *)handle, 0);
+	pam_status = pam_setcred((pam_handle_t *)handle, PAM_REFRESH_CRED);
+	if(pam_end(handle, pam_status) != PAM_SUCCESS) {
+		printf("[GGTKLOCK] start_authentication----pam_end failed\n");
+		fprintf(stderr, "pam_end() failed");
+	}
+
+	if(auth_status == PAM_SUCCESS) {
+		printf("[GGTKLOCK] start_authentication----AUTH STATUS SUCCESS\n");
+		return PW_SUCCESS;
+	}
+	else {
+		printf("[GGTKLOCK] start_authentication----AUTH FAILED\n");
+		return PW_FAILURE;
+	}
 }
 
-/*
-enum pwcheck auth_pw_check(const char *s, msgq mq, ) {
-}
-*/
-
-enum pwcheck auth_pw_check(const char *s) {
+enum pwcheck auth_pw_check(const char *s)
+{
 	static pipe_t err_pipe;
 	static pipe_t out_pipe;
 	static pid_t pid = -2;
@@ -147,7 +157,7 @@ enum pwcheck auth_pw_check(const char *s) {
 			close(out_pipe[PIPE_PARENT]);
       printf("GTKLOCK-----start auth child\n");
 			freopen("/dev/null", "r", stdin);
-			auth_child(s, err_pipe, out_pipe);
+			// auth_child(s, err_pipe, out_pipe);
 		}
 		close(err_pipe[PIPE_CHILD]);
 		close(out_pipe[PIPE_CHILD]);
